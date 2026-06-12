@@ -37,6 +37,91 @@ print(torch.cuda.get_device_name(0))
 assert torch.cuda.is_available()
 ```
 
+## Express training and play, about 5-10 minutes
+
+The H100 makes training fast, but CFR labels are generated on the Colab CPU.
+The exact duration therefore varies. This preset is intentionally small and
+produces a demonstration opponent, not a strong GTO agent:
+
+```bash
+!mkdir -p /content/rebel_quick/data
+
+!python scripts/generate_nlhe_data.py \
+  --output /content/rebel_quick/data/river \
+  --street river --examples 16 --shard-size 8 \
+  --cfr-iterations 4 --search-depth 2 --workers 2
+
+!python scripts/generate_nlhe_data.py \
+  --output /content/rebel_quick/data/turn \
+  --street turn --examples 8 --shard-size 8 \
+  --cfr-iterations 4 --search-depth 2 \
+  --rollout-boards 1 --workers 2
+
+!python scripts/generate_nlhe_data.py \
+  --output /content/rebel_quick/data/flop \
+  --street flop --examples 4 --shard-size 4 \
+  --cfr-iterations 2 --search-depth 2 \
+  --rollout-boards 1 --workers 2
+
+!python scripts/generate_nlhe_data.py \
+  --output /content/rebel_quick/data/preflop \
+  --street preflop --examples 4 --shard-size 4 \
+  --cfr-iterations 2 --search-depth 2 \
+  --rollout-boards 1 --workers 2
+```
+
+```bash
+!python scripts/train_nlhe.py \
+  --data /content/rebel_quick/data \
+  --output /content/rebel_quick/run \
+  --profile base --device cuda \
+  --epochs 8 --batch-size 16 --no-compile
+```
+
+Play from a Colab code cell. Enter the displayed action number:
+
+```python
+!python scripts/play_nlhe.py \
+  --checkpoint /content/rebel_quick/run/latest.pt \
+  --device cuda --human-seat 0
+```
+
+Use `--human-seat 1` to let the bot act first. The notebook input prompt works
+inside a normal Colab code cell.
+
+## Serious player target
+
+There is no honest five-minute path to a strong HUNL player. A serious run
+needs substantially more solved public states and repeated improvement passes.
+Use the production bootstrap below across multiple Colab sessions, keeping all
+data and checkpoints in Drive.
+
+Practical milestones:
+
+- at least 100,000 solved river PBS examples;
+- at least 50,000 turn, 25,000 flop, and 10,000 preflop examples;
+- 128-512 CFR+ iterations per generated target;
+- three or more regenerate/train cycles using the latest value checkpoint;
+- held-out evaluation plus large duplicate matches against earlier models.
+
+These are engineering targets, not a guarantee of professional or GTO-level
+strength. The current NumPy CFR generator is the limiting component. Moving it
+to C++/CUDA or generating data on a separate high-core CPU machine is the main
+upgrade after the first serious model.
+
+At play time, use continual resolving rather than the raw policy head:
+
+```python
+!python scripts/play_nlhe.py \
+  --checkpoint "$ROOT/runs/iteration_03/latest.pt" \
+  --device cuda --human-seat 0 \
+  --search-iterations 512 --search-depth 4
+```
+
+For faster decisions use `--search-iterations 128 --search-depth 3`. More
+search improves solving only if the value network itself has been trained on
+enough representative public belief states.
+
 ## End-to-end smoke test
 
 Run this before a long job:
@@ -71,13 +156,13 @@ Start with river because its pseudo-leaves have exact showdown values:
 ```bash
 !python scripts/generate_nlhe_data.py \
   --output "$ROOT/data/bootstrap/river" \
-  --street river --examples 20000 --shard-size 64 \
-  --cfr-iterations 128 --search-depth 6 --workers 8
+  --street river --examples 100000 --shard-size 64 \
+  --cfr-iterations 256 --search-depth 6 --workers 8
 
 !python scripts/generate_nlhe_data.py \
   --output "$ROOT/data_validation/river" \
-  --street river --examples 1000 --shard-size 64 \
-  --cfr-iterations 128 --search-depth 6 --workers 8 --seed 9001
+  --street river --examples 5000 --shard-size 64 \
+  --cfr-iterations 256 --search-depth 6 --workers 8 --seed 9001
 ```
 
 Add earlier streets with Monte Carlo check-down values. These are bootstrap
@@ -86,21 +171,21 @@ targets, not final equilibrium labels:
 ```bash
 !python scripts/generate_nlhe_data.py \
   --output "$ROOT/data/bootstrap/turn" \
-  --street turn --examples 10000 --shard-size 64 \
-  --cfr-iterations 64 --search-depth 4 \
-  --rollout-boards 4 --workers 8
+  --street turn --examples 50000 --shard-size 64 \
+  --cfr-iterations 128 --search-depth 5 \
+  --rollout-boards 8 --workers 8
 
 !python scripts/generate_nlhe_data.py \
   --output "$ROOT/data/bootstrap/flop" \
-  --street flop --examples 5000 --shard-size 64 \
-  --cfr-iterations 64 --search-depth 4 \
-  --rollout-boards 4 --workers 8
+  --street flop --examples 25000 --shard-size 64 \
+  --cfr-iterations 128 --search-depth 4 \
+  --rollout-boards 8 --workers 8
 
 !python scripts/generate_nlhe_data.py \
   --output "$ROOT/data/bootstrap/preflop" \
-  --street preflop --examples 2500 --shard-size 64 \
-  --cfr-iterations 32 --search-depth 3 \
-  --rollout-boards 2 --workers 8
+  --street preflop --examples 10000 --shard-size 64 \
+  --cfr-iterations 64 --search-depth 4 \
+  --rollout-boards 4 --workers 8
 ```
 
 Train the mixed-street model:
@@ -109,7 +194,7 @@ Train the mixed-street model:
 !python scripts/train_nlhe.py \
   --data "$ROOT/data/bootstrap" \
   --output "$ROOT/runs/bootstrap_h100" \
-  --profile h100 --device cuda --epochs 20 \
+  --profile h100 --device cuda --epochs 50 \
   --batch-size 384
 ```
 
@@ -123,8 +208,8 @@ Generate fresh targets using the trained value network at search leaves:
 ```bash
 !python scripts/generate_nlhe_data.py \
   --output "$ROOT/data/iteration_01/river" \
-  --street river --examples 10000 --shard-size 64 \
-  --cfr-iterations 256 --search-depth 6 \
+  --street river --examples 25000 --shard-size 64 \
+  --cfr-iterations 512 --search-depth 6 \
   --checkpoint "$ROOT/runs/bootstrap_h100/latest.pt" \
   --device cuda --workers 1
 ```
@@ -135,7 +220,7 @@ Then continue training on both old and new data:
 !python scripts/train_nlhe.py \
   --data "$ROOT/data" \
   --output "$ROOT/runs/iteration_01" \
-  --profile h100 --device cuda --epochs 30 \
+  --profile h100 --device cuda --epochs 70 \
   --batch-size 384 \
   --resume "$ROOT/runs/bootstrap_h100/latest.pt"
 ```

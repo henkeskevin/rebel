@@ -20,7 +20,7 @@ from .game import (
     Street,
     TerminalType,
 )
-from .pbs import PublicBeliefState, normalize_range
+from .pbs import PublicBeliefState, bayes_update, normalize_range
 from .solver import (
     CFRResult,
     CFRSolver,
@@ -44,6 +44,7 @@ __all__ = [
     "Street",
     "TerminalType",
     "card_to_string",
+    "bayes_update",
     "combo_cards",
     "combo_index",
     "compare_hands",

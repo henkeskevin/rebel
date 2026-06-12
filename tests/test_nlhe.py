@@ -223,6 +223,25 @@ class CFRSolverTest(unittest.TestCase):
         for _, _, sums in calls:
             self.assertTrue(np.allclose(sums, (1.0, 1.0), atol=1e-6))
 
+    def test_root_policy_prior_is_normalized_over_legal_actions(self):
+        game = HeadsUpNoLimitHoldem()
+        root = PublicBeliefState.uniform(game.initial_state())
+        prior = np.zeros((NUM_HOLE_COMBOS, game.config.max_actions))
+        prior[:, game.CHECK_CALL_SLOT] = 3.0
+        solver = CFRSolver(
+            game,
+            root,
+            max_depth=1,
+            leaf_value_fn=zero_leaf_values,
+            root_strategy_prior=prior,
+        )
+        self.assertTrue(
+            np.allclose(
+                solver.strategy[0, :, game.CHECK_CALL_SLOT],
+                1.0,
+            )
+        )
+
     def test_showdown_counterfactual_values_are_zero_sum(self):
         game = HeadsUpNoLimitHoldem(
             BettingConfig(stack_size=40, small_blind=1, big_blind=2)

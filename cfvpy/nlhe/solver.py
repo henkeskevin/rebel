@@ -57,12 +57,17 @@ class CFRSolver:
         *,
         max_depth: int = 2,
         leaf_value_fn: Optional[LeafValueFn] = None,
+        root_strategy_prior: Optional[np.ndarray] = None,
+        regret_matching_plus: bool = True,
+        linear_averaging: bool = True,
     ):
         if max_depth < 0:
             raise ValueError("max_depth must be non-negative")
         self.game = game
         self.root = root
         self.max_depth = max_depth
+        self.regret_matching_plus = regret_matching_plus
+        self.linear_averaging = linear_averaging
         self.tree = _build_public_tree(game, root.state, max_depth)
         has_pseudo_leaf = any(
             not node.children and not node.state.terminal for node in self.tree
@@ -81,6 +86,8 @@ class CFRSolver:
             (len(self.tree), game.config.max_actions), dtype=bool
         )
         self._initialize_uniform_strategy()
+        if root_strategy_prior is not None:
+            self._set_root_strategy_prior(root_strategy_prior)
 
         self.initial_ranges = np.asarray(root.ranges, dtype=np.float32)
         self.root_value_sum = [
@@ -154,14 +161,27 @@ class CFRSolver:
 
         self.root_value_sum[traverser] += values[0]
         self.traversals[traverser] += 1
+        if self.regret_matching_plus:
+            for node_id, node in enumerate(self.tree):
+                if not node.actions or node.state.player != traverser:
+                    continue
+                slots = [action.slot for action in node.actions]
+                self.regrets[node_id][:, slots] = np.maximum(
+                    self.regrets[node_id][:, slots], 0.0
+                )
         self._regret_match(traverser)
 
         updated_reaches = self._compute_reaches()
+        average_weight = (
+            float(sum(self.traversals)) if self.linear_averaging else 1.0
+        )
         for node_id, node in enumerate(self.tree):
             if not node.actions or node.state.player != traverser:
                 continue
             weight = updated_reaches[traverser, node_id, :, None]
-            self.strategy_sum[node_id] += weight * self.strategy[node_id]
+            self.strategy_sum[node_id] += (
+                average_weight * weight * self.strategy[node_id]
+            )
         return values[0].copy()
 
     def average_strategy(self) -> np.ndarray:
@@ -189,6 +209,24 @@ class CFRSolver:
             for action in node.actions:
                 self.legal_mask[node_id, action.slot] = True
                 self.strategy[node_id, :, action.slot] = probability
+
+    def _set_root_strategy_prior(self, prior: np.ndarray) -> None:
+        expected = (NUM_HOLE_COMBOS, self.game.config.max_actions)
+        prior = np.asarray(prior, dtype=np.float32)
+        if prior.shape != expected:
+            raise ValueError(
+                f"root_strategy_prior must have shape {expected}, "
+                f"got {prior.shape}"
+            )
+        slots = [action.slot for action in self.tree[0].actions]
+        clipped = np.maximum(prior[:, slots], 0.0)
+        totals = clipped.sum(axis=1, keepdims=True)
+        normalized = np.empty_like(clipped)
+        positive = totals[:, 0] > 0
+        normalized[positive] = clipped[positive] / totals[positive]
+        normalized[~positive] = 1.0 / len(slots)
+        self.strategy[0] = 0.0
+        self.strategy[0][:, slots] = normalized
 
     def _regret_match(self, traverser: int) -> None:
         for node_id, node in enumerate(self.tree):

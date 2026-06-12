@@ -26,6 +26,9 @@ checkpoint resume, evaluation, and model-backed solving.
 
 Follow [docs/training_colab.md](docs/training_colab.md), or open
 [notebooks/ReBeL_HUNL_Colab.ipynb](notebooks/ReBeL_HUNL_Colab.ipynb).
+Both include an express training preset and an interactive human-versus-model
+game. The game client uses online CFR+ continual resolving; the policy network
+is a prior, not the final action selector.
 
 ## Installation
 
