@@ -4,3 +4,7 @@ cfvpy/rela*.so
 ^exps/
 strategy*.txt
 __pycache__/
+.venv/
+data_nlhe/
+runs_nlhe/
+tmp_nlhe_data/

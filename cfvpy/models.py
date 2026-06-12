@@ -16,6 +16,9 @@ from typing import Tuple
 import torch
 from torch import nn
 
+from cfvpy.nlhe.cards import NUM_HOLE_COMBOS
+from cfvpy.nlhe.pbs import POLICY_INPUT_SIZE, VALUE_INPUT_SIZE
+
 
 def build_mlp(
     *,
@@ -97,3 +100,61 @@ class Net2(nn.Module):
 class GELU(nn.Module):
     def forward(self, x):
         return nn.functional.gelu(x)
+
+
+class PokerValueNet(nn.Module):
+    """Counterfactual value network from the ReBeL HUNL architecture."""
+
+    def __init__(
+        self,
+        *,
+        n_hidden=1536,
+        n_layers=6,
+        use_layer_norm=True,
+        dropout=0,
+    ):
+        super().__init__()
+        self.body = build_mlp(
+            n_in=VALUE_INPUT_SIZE,
+            n_hidden=n_hidden,
+            n_layers=n_layers,
+            use_layer_norm=use_layer_norm,
+            dropout=dropout,
+        )
+        body_output_size = n_hidden if n_layers > 0 else VALUE_INPUT_SIZE
+        self.output = nn.Linear(body_output_size, NUM_HOLE_COMBOS)
+        with torch.no_grad():
+            self.output.weight.data *= 0.01
+            self.output.bias.data *= 0.01
+
+    def forward(self, packed_input: torch.Tensor):
+        return self.output(self.body(packed_input))
+
+
+class PokerPolicyNet(nn.Module):
+    """Policy logits for every private hand and abstract action slot."""
+
+    def __init__(
+        self,
+        *,
+        max_actions=9,
+        n_hidden=1536,
+        n_layers=6,
+        use_layer_norm=True,
+        dropout=0,
+    ):
+        super().__init__()
+        self.max_actions = max_actions
+        self.body = build_mlp(
+            n_in=POLICY_INPUT_SIZE,
+            n_hidden=n_hidden,
+            n_layers=n_layers,
+            use_layer_norm=use_layer_norm,
+            dropout=dropout,
+        )
+        body_output_size = n_hidden if n_layers > 0 else POLICY_INPUT_SIZE
+        self.output = nn.Linear(body_output_size, NUM_HOLE_COMBOS * max_actions)
+
+    def forward(self, packed_input: torch.Tensor):
+        logits = self.output(self.body(packed_input))
+        return logits.view(-1, NUM_HOLE_COMBOS, self.max_actions)

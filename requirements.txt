@@ -1,5 +1,6 @@
 ipython
 black==19.10b0
+numpy
 torch==1.4.0
 tqdm
 

@@ -1,7 +1,31 @@
 # ReBeL
 
 Implementation of [ReBeL](https://arxiv.org/abs/2007.13544), an algorithm that generalizes the paradigm of self-play reinforcement learning and search to imperfect-information games.
-This repository contains implementation only for [Liar's Dice](https://en.wikipedia.org/wiki/Liar%27s_dice) game.
+The original release contains a complete training loop only for
+[Liar's Dice](https://en.wikipedia.org/wiki/Liar%27s_dice). This fork also
+contains a heads-up no-limit Texas hold'em foundation: betting rules, a
+nine-slot action abstraction, 1,326-card ranges with blockers, showdown
+evaluation, public-belief-state encoding, poker value/policy networks, and a
+depth-limited NumPy CFR solver. See [docs/nlhe.md](docs/nlhe.md) for the
+implemented scope and the remaining high-throughput training integration.
+
+Run a small preflop solver smoke test with explicit zero-valued leaves:
+
+```bash
+python scripts/solve_nlhe.py --iterations 8 --depth 2 --hand AsKd
+```
+
+This command validates the CFR path; it is not a trained poker strategy.
+
+## HUNL training on Colab H100
+
+The modern HUNL pipeline is separate from the Python 3.7/Torch 1.4 legacy
+trainer. It includes a structured 70M-parameter value/policy network, BF16
+training, quantized policy targets, multiprocess CFR data generation,
+checkpoint resume, evaluation, and model-backed solving.
+
+Follow [docs/training_colab.md](docs/training_colab.md), or open
+[notebooks/ReBeL_HUNL_Colab.ipynb](notebooks/ReBeL_HUNL_Colab.ipynb).
 
 ## Installation
 
